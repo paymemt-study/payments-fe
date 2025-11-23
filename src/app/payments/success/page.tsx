@@ -80,6 +80,20 @@ export default function PaymentSuccessPage() {
         <>
           <hr />
           <pre>{JSON.stringify(resp, null, 2)}</pre>
+          <a
+            href={`/orders/${orderId}`}
+            style={{
+              display: "inline-block",
+              marginTop: "16px",
+              padding: "8px 12px",
+              backgroundColor: "#4f46e5",
+              color: "white",
+              borderRadius: "6px",
+              textDecoration: "none",
+            }}
+          >
+            주문 상세 보기
+          </a>
         </>
       )}
     </main>
