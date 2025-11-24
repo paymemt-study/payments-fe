@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect } from "react";
+
 type Props = {
   searchParams: {
     code?: string;
@@ -8,6 +12,18 @@ type Props = {
 
 export default function PaymentFailPage({ searchParams }: Props) {
   const { code, message, orderId } = searchParams;
+
+  useEffect(() => {
+    if (orderId) {
+      fetch("http://localhost:8080/api/payments/fail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      }).catch((err) => {
+        console.error("fail 처리 API 오류:", err);
+      });
+    }
+  }, [orderId]);
 
   return (
     <main style={{ padding: 40 }}>
