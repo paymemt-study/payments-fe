@@ -13,21 +13,26 @@ export function OrderDetailClient({ order }: Props) {
   const [reason, setReason] = useState<string>("단순 변심");
 
   const isOrderPaid = order.status === "PAID";
-  const isPaymentPaid =
-    order.payment && order.payment.status === "PAID";
+  const isPaymentCancelable =
+    order.payment &&
+    (order.payment.status === "PAID" ||
+      order.payment.status === "PARTIAL_REFUND");
 
-  const canCancel = isOrderPaid && isPaymentPaid && order.payment;
+  const canCancel = isOrderPaid && !!isPaymentCancelable && !!order.payment;
 
   if (!canCancel) {
     return (
       <div style={{ marginTop: 16, color: "#666" }}>
-        취소/환불은 결제 상태가 PAID인 경우에만 가능합니다.
+        취소/환불은 결제 상태가 PAID 또는 PARTIAL_REFUND인 경우에만
+        가능합니다.
       </div>
     );
   }
 
-  const orderId = order.orderId;
-  const fullAmount = order.payment!.amountKrw;
+  const payment = order.payment!;
+  const fullAmount = payment.amountKrw;
+  const refundedAmount = payment.refundedAmountKrw ?? 0;
+  const remainingAmount = fullAmount - refundedAmount;
 
   const callCancelApi = async (cancelAmount: number, cancelReason: string) => {
     setLoading(true);
@@ -36,7 +41,7 @@ export function OrderDetailClient({ order }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderId,
+          orderId: order.orderId, // ✅ 백엔드 PaymentCancelRequest와 맞춤
           amount: cancelAmount,
           reason: cancelReason,
         }),
@@ -53,7 +58,6 @@ export function OrderDetailClient({ order }: Props) {
       console.log("cancel success:", data);
 
       alert("취소/환불이 완료되었습니다.");
-      // 간단하게 새로고침으로 상태 반영
       window.location.reload();
     } catch (e) {
       console.error(e);
@@ -64,10 +68,18 @@ export function OrderDetailClient({ order }: Props) {
   };
 
   const handleFullCancel = async () => {
-    if (!window.confirm("정말 전체 결제를 취소하시겠습니까?")) {
+    if (remainingAmount <= 0) {
+      alert("더 이상 환불 가능한 금액이 없습니다.");
       return;
     }
-    await callCancelApi(fullAmount, reason || "단순 변심");
+    if (
+      !window.confirm(
+        `정말 남은 금액 전체(₩${remainingAmount.toLocaleString()}원)를 취소하시겠습니까?`
+      )
+    ) {
+      return;
+    }
+    await callCancelApi(remainingAmount, reason || "단순 변심");
   };
 
   const handlePartialRefund = async () => {
@@ -76,11 +88,15 @@ export function OrderDetailClient({ order }: Props) {
       alert("부분 환불 금액을 올바르게 입력하세요.");
       return;
     }
-    if (amount > fullAmount) {
-      alert("부분 환불 금액은 결제 금액보다 클 수 없습니다.");
+    if (amount > remainingAmount) {
+      alert(
+        `부분 환불 금액은 남은 환불 가능 금액(₩${remainingAmount.toLocaleString()}원)보다 클 수 없습니다.`
+      );
       return;
     }
-    if (!window.confirm(`₩${amount.toLocaleString()}원을 부분 환불하시겠습니까?`)) {
+    if (
+      !window.confirm(`₩${amount.toLocaleString()}원을 부분 환불하시겠습니까?`)
+    ) {
       return;
     }
     await callCancelApi(amount, reason || "부분 환불");
@@ -97,9 +113,11 @@ export function OrderDetailClient({ order }: Props) {
     >
       <h3>결제 취소 / 환불</h3>
       <p style={{ fontSize: 14, color: "#666" }}>
-        • 전체 취소: 결제 전체 금액({fullAmount.toLocaleString()}원) 취소
+        • 결제 총액: {fullAmount.toLocaleString()}원
         <br />
-        • 부분 환불: 결제 금액의 일부만 환불 (테스트용)
+        • 누적 환불 금액: {refundedAmount.toLocaleString()}원
+        <br />
+        • 남은 환불 가능 금액: {remainingAmount.toLocaleString()}원
       </p>
 
       <div style={{ marginTop: 12 }}>
@@ -116,16 +134,17 @@ export function OrderDetailClient({ order }: Props) {
       </div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
-        {/* 전체 취소 버튼 */}
+        {/* 남은 금액 전체 취소 */}
         <button
           onClick={handleFullCancel}
-          disabled={loading}
+          disabled={loading || remainingAmount <= 0}
           style={{
             padding: "8px 16px",
-            cursor: loading ? "not-allowed" : "pointer",
+            cursor:
+              loading || remainingAmount <= 0 ? "not-allowed" : "pointer",
           }}
         >
-          {loading ? "처리 중..." : "전체 취소"}
+          {loading ? "처리 중..." : "남은 금액 전체 취소"}
         </button>
 
         {/* 부분 환불 영역 */}
@@ -133,7 +152,7 @@ export function OrderDetailClient({ order }: Props) {
           <input
             type="number"
             min={1}
-            max={fullAmount}
+            max={remainingAmount}
             value={partialAmount}
             onChange={(e) => setPartialAmount(e.target.value)}
             placeholder="부분 환불 금액"

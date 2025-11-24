@@ -24,7 +24,7 @@ export interface PaymentInfo {
   amountKrw: number;     // 결제(또는 전체 결제) 금액
   approvedAt: string;    // ISO 문자열
   canceledAt?: string;   // 취소(환불) 완료 시각
-  refundedAmount?: number; // 부분/전체 환불 금액
+  refundedAmountKrw?: number; // 부분/전체 환불 금액
 }
 
 export interface OrderDetail extends OrderSummary {
