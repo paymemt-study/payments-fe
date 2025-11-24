@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { OrderDetail } from "@/types/order";
+import { OrderDetailClient } from "./OrderDetailClient";
 
 async function fetchOrderDetail(orderId: string): Promise<OrderDetail> {
-  console.log("[OrderDetailPage] orderId param =", orderId);
-
   const res = await fetch(
     `http://localhost:8080/api/orders/${orderId}?userId=1`,
     { cache: "no-store" }
@@ -19,14 +18,11 @@ async function fetchOrderDetail(orderId: string): Promise<OrderDetail> {
 }
 
 type PageProps = {
-  params: Promise<{ orderId: string }>;
+  params: { orderId: string };
 };
 
 export default async function OrderDetailPage({ params }: PageProps) {
   const { orderId } = await params;
-
-  console.log("[OrderDetailPage] unwrapped orderId =", orderId);
-
   const order = await fetchOrderDetail(orderId);
 
   return (
@@ -51,12 +47,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <p>결제상태: {order.payment.status}</p>
             <p>
               승인일시:{" "}
-              {new Date(order.payment.approvedAt).toLocaleString("ko-KR")}
+              {order.payment.approvedAt
+                ? new Date(order.payment.approvedAt).toLocaleString("ko-KR")
+                : "-"}
             </p>
           </>
         ) : (
           <p>아직 결제 정보가 없습니다. (PENDING 상태)</p>
         )}
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <OrderDetailClient order={order} />
       </section>
 
       <div style={{ marginTop: 24 }}>
