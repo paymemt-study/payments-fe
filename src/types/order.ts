@@ -30,3 +30,27 @@ export interface PaymentInfo {
 export interface OrderDetail extends OrderSummary {
   payment: PaymentInfo | null;
 }
+
+// =======================
+//   주문 생성 요청 타입
+// =======================
+
+export type CreateOrderItem = {
+  productId: number;
+  quantity: number;
+};
+
+export type CreateOrderRequest = {
+  userId: number;              // 백엔드 Long userId 와 매칭
+  items: CreateOrderItem[];    // 백엔드 OrderItemRequest 와 동일
+};
+
+// =======================
+//   주문 생성 응답 타입
+// =======================
+
+export type CreateOrderResponse = {
+  orderId: string;        // 백엔드 CreateOrderResponse.orderId 와 매칭 (externalId)
+  totalAmountKrw: number; // 백엔드 CreateOrderResponse.totalAmountKrw
+  currency: string;       // 백엔드 CreateOrderResponse.currency
+};

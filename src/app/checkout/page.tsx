@@ -1,81 +1,122 @@
+// src/app/checkout/page.tsx
 "use client";
 
-import { useState } from "react";
-import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
+import { useEffect, useState } from "react";
+import {
+  CreateOrderItem,
+  CreateOrderRequest,
+  CreateOrderResponse,
+} from "@/types/order";
 
-type CreateOrderResponse = {
-  orderId: string;
-  amount: number;
+declare global {
+  interface Window {
+    TossPayments: (clientKey: string) => any;
+  }
+}
+
+const TOSS_CLIENT_KEY = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY!;
+
+// 백엔드 Product 응답 타입 (단순 버전)
+type ProductSummary = {
+  id: number;
+  name: string;
+  listPriceKrw: number;
 };
 
 export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [selectedItems, setSelectedItems] = useState<CreateOrderItem[]>([]);
 
-  const createOrderAndPay = async () => {
-    if (!process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY) {
-      alert("Toss 클라이언트 키가 없습니다.");
-      return;
-    }
+  // 1) 마운트 시 상품 목록 조회
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:8080/api/products");
+        if (!res.ok) {
+          console.error("fetch products failed:", res.status);
+          return;
+        }
+        const data: ProductSummary[] = await res.json();
+        setProducts(data);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  }, []);
 
-    setLoading(true);
+  // 특정 productId의 수량 변경 (+1, -1 등)
+  const changeQuantity = (productId: number, delta: number) => {
+    setSelectedItems((prev) => {
+      const existing = prev.find((i) => i.productId === productId);
+      if (!existing) {
+        // 기존에 없는데 delta>0 이면 새로 추가
+        if (delta <= 0) return prev;
+        return [...prev, { productId, quantity: delta }];
+      }
 
+      const newQty = existing.quantity + delta;
+      if (newQty <= 0) {
+        // 0 이하가 되면 목록에서 제거
+        return prev.filter((i) => i.productId !== productId);
+      }
+
+      return prev.map((i) =>
+        i.productId === productId ? { ...i, quantity: newQty } : i
+      );
+    });
+  };
+
+  const handleCheckout = async () => {
     try {
-      // 1) 주문 생성
-      const orderRes = await fetch("http://localhost:8080/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: 50000,
-          orderName: "테스트 상품",
-          userId: 1,
-        }),
-      });
+      setLoading(true);
+
+      if (selectedItems.length === 0) {
+        alert("주문할 상품을 선택해주세요.");
+        return;
+      }
+
+      const body: CreateOrderRequest = {
+        userId: 1,
+        items: selectedItems,
+      };
+
+      const orderRes = await fetch(
+        "http://localhost:8080/api/order-commands",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
 
       if (!orderRes.ok) {
-        alert("주문 생성 실패");
+        const text = await orderRes.text();
+        console.error("createOrder failed:", orderRes.status, text);
+        alert("주문 생성에 실패했습니다.");
         return;
       }
 
       const order: CreateOrderResponse = await orderRes.json();
-      const { orderId, amount } = order;
 
-      // 2) Toss SDK 로드
-      const tossPayments = await loadTossPayments(
-        process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY
-      );
+      if (!window.TossPayments) {
+        alert("TossPayments SDK 로드가 안됐습니다.");
+        return;
+      }
 
-      const payment = tossPayments.payment({
-        customerKey: "USER-1",
+      const tossPayments = window.TossPayments(TOSS_CLIENT_KEY);
+      const origin = window.location.origin;
+
+      await tossPayments.requestPayment("카드", {
+        amount: order.totalAmountKrw,
+        orderId: order.orderId,
+        orderName: "테스트 주문", // TODO: 선택된 상품명들 join해서 넣어도 됨
+        successUrl: `${origin}/payments/success`,
+        failUrl: `${origin}/payments/fail`,
       });
-
-      // 3) 결제 요청
-      await payment
-        .requestPayment({
-          method: "CARD",
-          amount: { value: amount, currency: "KRW" },
-          orderId,
-          orderName: "테스트 상품",
-          successUrl: `${window.location.origin}/payments/success`,
-          failUrl: `${window.location.origin}/payments/fail`,
-        })
-        .catch(async (err) => {
-          if (err.code === "USER_CANCEL") {
-            // 🔥 결제창 닫힘 → 자동 실패 처리 API 호출
-            await fetch("http://localhost:8080/api/payments/fail", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ orderId }),
-            });
-
-            alert("결제가 취소되었습니다.");
-            return;
-          }
-
-          throw err;
-        });
     } catch (e) {
       console.error(e);
-      alert("결제 중 오류가 발생했습니다.");
+      alert("결제 요청 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
@@ -83,9 +124,62 @@ export default function CheckoutPage() {
 
   return (
     <main style={{ padding: 40 }}>
-      <h1>결제 테스트</h1>
-      <button onClick={createOrderAndPay} disabled={loading}>
-        {loading ? "요청 중..." : "50000원 결제하기"}
+      <h1>결제 데모 (Product + OrderLine 기반 주문)</h1>
+
+      <section>
+        <h2>상품 선택</h2>
+        <ul>
+          {products.map((p) => {
+            const selected = selectedItems.find(
+              (i) => i.productId === p.id
+            );
+            const qty = selected?.quantity ?? 0;
+
+            return (
+              <li key={p.id} style={{ marginBottom: 8 }}>
+                {p.name} - ₩{p.listPriceKrw.toLocaleString()}
+                <span style={{ marginLeft: 12 }}>
+                  수량: <strong>{qty}</strong>
+                </span>
+                <button
+                  style={{ marginLeft: 8 }}
+                  onClick={() => changeQuantity(p.id, +1)}
+                >
+                  +
+                </button>
+                <button
+                  style={{ marginLeft: 4 }}
+                  onClick={() => changeQuantity(p.id, -1)}
+                  disabled={qty === 0}
+                >
+                  -
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <h2>현재 선택된 주문 항목</h2>
+        {selectedItems.length === 0 ? (
+          <p>선택된 상품이 없습니다.</p>
+        ) : (
+          <ul>
+            {selectedItems.map((item, idx) => (
+              <li key={idx}>
+                productId: {item.productId} / 수량: {item.quantity}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <button
+        onClick={handleCheckout}
+        disabled={loading || selectedItems.length === 0}
+      >
+        {loading ? "처리중..." : "결제하기"}
       </button>
     </main>
   );
